@@ -21,17 +21,16 @@ object Imports {
   sealed trait Selector
   case class Name(name: String) extends Selector
   case class Rewrite(name: String, rewrite: String = "") extends Selector
-  case class Selectors(selectors: List[Selector], path: Path = Path()) extends Content
+  case class Import(path: Path, selectors: List[Selector]) extends Content
 
   class Parser extends RegexParsers {
     override def skipWhitespace = false
 
-    def ws: Parser[String] = """\s*""".r
-    def any: Parser[String] = """.|(\r?\n)+""".r
-    def id: Parser[String] = """[0-9A-Za-z-_]+""".r
+    def ws: Parser[String] = """(\s|(\r?\n))*""".r
 
-    def contents: Parser[List[Content]] =
-      (expr | anythingBut(expr)).*
+    def any: Parser[String] = """.|(\r?\n)+""".r
+
+    def id: Parser[String] = """[0-9A-Za-z-_]+""".r
 
     def anythingBut[T](p: Parser[T]): Parser[Text] =
       (guard(p) ^^ { _ => Text("") }
@@ -44,17 +43,17 @@ object Imports {
         case head ~ tails => Path(head :: tails)
       }
 
-    def multiple: Parser[Selectors] =
+    def multiple: Parser[Import] =
       (path ~ (".{" ~ ws)) ~ selector ~ ((ws ~ "," ~ ws) ~> selector).* <~ (ws ~ "}") ^^ {
-        case (path ~ _ ) ~ head ~ tails => Selectors(head :: tails, path)
+        case (path ~ _ ) ~ head ~ tails => Import(path, head :: tails)
       }
 
     def selector: Parser[Selector] =
       (rewrite | name)
 
-    def one: Parser[Selectors] =
+    def one: Parser[Import] =
       path ^^ {
-        case Path(xs) => Selectors(Name(xs.last) :: Nil, Path(xs.init))
+        case Path(xs) => Import(Path(xs.init), Name(xs.last) :: Nil)
       }
 
     def name: Parser[Name] =
@@ -67,10 +66,13 @@ object Imports {
         case name ~ _ ~ sel => Rewrite(name, sel)
       }
 
-    def expr: Parser[Selectors] =
+    def imports: Parser[Import] =
       ("import " ~ ws) ~> (multiple | one) ^^ {
         case sx => sx
       }
+
+    def contents: Parser[List[Content]] =
+      (imports | anythingBut(imports)).*
 
     def apply(in: String) = parseAll(contents, in)
   }
@@ -78,5 +80,28 @@ object Imports {
   def apply(in: String) = new Parser()(in) match {
     case result if result.successful => Right(result.get)
     case fail => Left(fail)
+  }
+}
+
+
+object Main {
+  def main(args: Array[String]) {
+    Imports("""package foo
+            |
+            |import bar.baz.Boom
+            |import bar.loom.{ Zoom => Cloom, Vavoom => _, Hume }
+            |import pkg._
+            |import pkg.Name._
+            |import breaks.{
+            |  A => B,
+            |  C,
+            |  D => _
+            |}
+            |
+            |case class Test {
+            |
+            |}""".stripMargin).fold({ e => sys.error(e.toString) }, { content =>
+              content.collect { case s: Imports.Import => s }.foreach(println(_))
+            })
   }
 }
