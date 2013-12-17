@@ -1,6 +1,7 @@
 package vandelay
 
 import scala.util.parsing.combinator.RegexParsers
+import scala.util.parsing.input.Positional
 
 /** read what appears to be imports from a stream of lines. things that appear to be imports are in the form
  *
@@ -15,13 +16,18 @@ object Imports {
 
   case class Path(elements: List[String] = Nil)
 
-  sealed trait Content
-  case class Text(content: String) extends Content
+  sealed trait Content {
+    def line: Int
+  }
+  case class Text(content: String) extends Content with Positional {
+    val line = pos.line
+  }
+  class Preamble extends Positional
 
   sealed trait Selector
   case class Name(name: String) extends Selector
   case class Rewrite(name: String, rewrite: String = "") extends Selector
-  case class Import(path: Path, selectors: List[Selector]) extends Content
+  case class Import(path: Path, selectors: List[Selector], line: Int = 0) extends Content
 
   class Parser extends RegexParsers {
     override def skipWhitespace = false
@@ -66,13 +72,18 @@ object Imports {
         case name ~ _ ~ sel => Rewrite(name, sel)
       }
 
+    def preamble: Parser[Preamble] =
+      ("import" ~ ws) ^^ {
+        case _ ~ _ => new Preamble
+      }
+
     def imports: Parser[Import] =
-      ("import " ~ ws) ~> (multiple | one) ^^ {
-        case sx => sx
+      positioned(preamble) ~ (multiple | one) ^^ {
+        case pre ~ sx => sx.copy(line = pre.pos.line)
       }
 
     def contents: Parser[List[Content]] =
-      (imports | anythingBut(imports)).*
+      (imports | positioned(anythingBut(imports))).*
 
     def apply(in: String) = parseAll(contents, in)
   }
@@ -101,7 +112,9 @@ object Main {
             |case class Test {
             |
             |}""".stripMargin).fold({ e => sys.error(e.toString) }, { content =>
-              content.collect { case s: Imports.Import => s }.foreach(println(_))
+              content.collect { case s: Imports.Import => s }.foreach {
+                imp => println(s" ${imp.line} ${imp}")
+              }
             })
   }
 }
