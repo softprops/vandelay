@@ -22,7 +22,7 @@ object Imports {
   case class Text(content: String) extends Content with Positional {
     val line = pos.line
   }
-  class Preamble extends Positional
+  class Declaration extends Positional
 
   sealed trait Selector
   case class Name(name: String) extends Selector
@@ -31,6 +31,8 @@ object Imports {
 
   class Parser extends RegexParsers {
     override def skipWhitespace = false
+
+    def spaces: Parser[String] = """\s*""".r
 
     def ws: Parser[String] = """(\s|(\r?\n))*""".r
 
@@ -72,13 +74,13 @@ object Imports {
         case name ~ _ ~ sel => Rewrite(name, sel)
       }
 
-    def preamble: Parser[Preamble] =
-      ("import" ~ ws) ^^ {
-        case _ ~ _ => new Preamble
+    def declaration: Parser[Declaration] =
+      ("import" ~ spaces) ^^ {
+        case _ ~ _ => new Declaration
       }
 
     def imports: Parser[Import] =
-      positioned(preamble) ~ (multiple | one) ^^ {
+      positioned(declaration) ~ (multiple | one) ^^ {
         case pre ~ sx => sx.copy(line = pre.pos.line)
       }
 
